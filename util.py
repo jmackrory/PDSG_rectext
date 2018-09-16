@@ -9,12 +9,24 @@ def clean_up(comments):
     Removes numbers, some symbols and html trash from a Pandas series of messages.
     """
     com_clean=comments.str.lower()
-    #Remove markup trash, via non-greedy replacing anything between backticks.
-    com_clean=com_clean.str.replace("\[.*\]",' ')    
+    # com_clean=com_clean.str.replace("\'",'')
+    # #Remove markup trash, via non-greedy replacing anything between backticks.
+    # re1="\[.*\]"
+    # re2="http[:A-Za-z0-9/\-]"
+    # # #Should probably combine into a single regex.
+    # # #remove apostrophes without space
+    # # #remove symbols.    There must be a more comprehensive way of doing this?
+    # re3="[!\"#\$%&\'\(\)\*\+,-\.\/:;<=>?@\[\]\\^_`\{\|\}~]+"
+    # re_tot='|'.join([re1,re2,re3])
+    # com_clean=com_clean.str.replace(re_tot,' ')
+    # # com_clean=com_clean.str.replace(re_str,' ')
+    # # #remove multiple spaces, replace with a single space
+    # com_clean=com_clean.str.replace('\\s+',' ')
+    com_clean=com_clean.str.replace("\[.*\]",' ')
+    com_clean=com_clean.str.replace("http[:A-Za-z0-9/\-\.\+\~\?\=\&]+",' ')
     #Should probably combine into a single regex.
     #remove apostrophes without space
     com_clean=com_clean.str.replace("\'",'')
-    
     #remove symbols.    There must be a more comprehensive way of doing this?
     re_str="[!\"#\$%&\'\(\)\*\+,-\.\/:;<=>?@\[\]\\^_`\{\|\}~]+"
     #re_str="["+escape_punctuation()+"]+"
@@ -24,7 +36,7 @@ def clean_up(comments):
     return com_clean
 
 def escape_punctuation():
-    """Puts backslashes on all common punctuation from string module"""
+    """Returns an escaped string for all common punctuation from string module"""
     str_esc=""
     for symbol in string.punctuation:
         str_esc=str_esc+'\{}'.format(symbol)
