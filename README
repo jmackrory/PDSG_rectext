@@ -16,15 +16,12 @@ From another notebook I have working (but terribly inefficient) code to use pre-
 and a LSTM network to predict scores.  It's super slow, and requires some fiddling to make it
 work efficiently. 
 
+Includes some libraries for SVMs using the approximate kernel method (which I did not code up),
+and the ensemble method.
+
+Could then train an ensemble method from the existing predictors too.  
+
 Most of these are trained on the RMSE, but it might make sense to use a weighted RMSE instead
 to weight rarer occurences, given the skew in the data. 
-
-TODO:
-- Build data pipelines for each model
-- Scale scores?  Play with quantiles
-- Do Cross-validation to select hyper parameters (vectorization choices, regularization, network depth/width/activation)
-- Get RNN working
-- create sklearn metric
-- Spark (word counts, ALS)
 
 (Note this basical combines the toxic comment analysis, and boardgame recommendations).
