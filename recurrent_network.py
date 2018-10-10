@@ -14,31 +14,54 @@ from util import sent_to_matrix, load_glove, sentence_lookup
 from IPython.display import clear_output
 import time
 
-class recurrent_NN(object):
+class RNNConfig(object):
+    """
+    RNNConfig
+
+    Storage class for Recurrent network parameters.
+    Note that wordvec is a large matrix!
+
+    """
+    def __init__(self,maxlen,Ndim,wordvec,
+                 Ninputs=1, Noutputs=1,
+                 cell='RNN',Nlayers=2,Nhidden=50,
+                 lr=0.001,Nepoch=1000,keep_prob=0.5,
+                 Nprint=20,Nbatch=100):
+
+        #number of words to include per sentence.
+        self.maxlen=maxlen
+        #number of dim on input
+        self.Nfeatures=Ndim
+        self.is_training=True
+        #only grabbing a fraction of the data
+        self.wordvec=wordvec
+        self.Ninputs=Ninputs        
+        self.Noutputs=Noutputs
+        #number of dim on input
+        self.cell_type=cell
+        self.Nlayers=Nlayers
+        self.Nhidden=Nhidden
+        self.lr = lr
+        self.keep_prob=keep_prob
+        self.Nepoch=Nepoch
+        self.Nprint=Nprint
+        #only grabbing a fraction of the data
+        self.Nbatch=Nbatch
+
+    def __print__(self):
+        return self.__dict__
+
+    
+class recurrentNeuralNetwork(object):
     """
     Make a multi-layer recurrent neural network for predicting toxicity.
     Train via minibatch (with balanced choices).
     
     Need to update for multi-class output.
     """
-    def __init__(self,maxlen,Ndim,Noutputs,cell,wordvec):
-        #number of outputs per input
-        self.Noutputs=Noutputs
-        #number of steps
-        self.maxlen=maxlen
-        #number of dim on input
-        self.Nfeatures=Ndim
-        self.cell_type=cell
-        self.Nlayers=2
-        self.Nhidden=Ndim
-        self.lr = 0.001
-        self.keep_prob=0.5
-        self.n_iter=40
-        self.nprint=20
-        self.is_training=True
-        #only grabbing a fraction of the data
-        self.Nbatch=100
-        self.wordvec=wordvec
+    def __init__(self,config):
+        self.config=config
+        #makes the tensor flow graph.
         self.build()
 
     def build(self):
@@ -56,12 +79,11 @@ class recurrent_NN(object):
         as instance variables for the model.
         """
         #load in the training examples, and their labels
-        self.X = tf.placeholder(tf.float32, [self.Nbatch,self.maxlen,self.Nfeatures],name='X')
-        self.y = tf.placeholder(tf.float32,[self.Nbatch,self.Noutputs],name='y')
+        self.X = tf.placeholder(tf.float32, [self.config.Nbatch,self.config.maxlen,self.config.Nfeatures],name='X')
+        self.y = tf.placeholder(tf.float32, [self.config.Nbatch,self.config.Noutputs],name='y')
 
     def create_feed_dict(self,inputs_batch, labels_batch=None):
-        """Make a feed_dict from inputs, labels as inputs for 
-        graph.
+        """Make a feed_dict from inputs, labels as inputs for graph.
         Args:
         inputs_batch - batch of input data
         label_batch  - batch of output labels. (Can be none for prediction)
@@ -79,15 +101,14 @@ class recurrent_NN(object):
         and activation function fn.
         """
         #Make cell type
-        if self.cell_type=='basic':
+        if self.config.cell_type=='RNN':
             cell=BasicRNNCell(num_units=Nneurons,activation=fn)
-        elif self.cell_type=='LSTM':
+        elif self.config.cell_type=='LSTM':
             cell=LSTMCell(num_units=Nneurons,activation=fn)
-        elif self.cell_type=='GRU':
+        elif self.config.cell_type=='GRU':
             cell=GRUCell(num_units=Nneurons,activation=fn)
         #include dropout when training
-        if self.is_training:
-            cell=DropoutWrapper(cell,input_keep_prob=self.keep_prob,
+        cell=DropoutWrapper(cell,input_keep_prob=self.config.keep_prob,
                                 variational_recurrent=True,
                                 input_size=Nneurons,
                                 dtype=tf.float32)
@@ -99,15 +120,14 @@ class recurrent_NN(object):
         Implements deep neural network with relu activation.
         """
         cell_list=[]
-        for i in range(self.Nlayers):
-            cell_list.append(self.make_RNN_cell(self.Nhidden,tf.nn.leaky_relu))
+        for i in range(self.config.Nlayers):
+            cell_list.append(self.make_RNN_cell(self.config.Nhidden,tf.nn.leaky_relu))
 
         multi_cell=tf.contrib.rnn.MultiRNNCell(cell_list,state_is_tuple=True)
-        #Note that using [cell]*n_layers does not work.  This just made a copy pointing at the SAME cell in memory.
         rnn_outputs,states=tf.nn.dynamic_rnn(multi_cell,self.X,dtype=tf.float32)
         #use states (like CNN) since 
         #this maps the number of hidden units to fewer outputs.
-        outputs = fully_connected(states,self.Noutputs,activation_fn=tf.sigmoid)
+        outputs = fully_connected(states,self.config.Noutputs,activation_fn=tf.sigmoid)
         outputs=outputs[0]
        
         return outputs
@@ -118,17 +138,18 @@ class recurrent_NN(object):
         Computes log-loss.  Should upgrade to column-wise.
         """
         eps=1E-15
-        logloss = tf.losses.log_loss(self.y,outputs,epsilon=eps)
-        #rocloss,roc_op=tf.metrics.auc(self.y,outputs)
+        #logloss = tf.losses.log_loss(self.y,outputs,epsilon=eps)
+        #could expand to include optional weights.
+        loss= tf.losses.mean_squared_error(self.y,outputs)
 
-        return logloss
+        return loss
 
     def add_training_op(self,loss):
         """Create op for optimizing loss function.
         Can be passed to sess.run() to train the model.
         Return 
         """
-        optimizer=tf.train.AdamOptimizer(learning_rate=self.lr)
+        optimizer=tf.train.AdamOptimizer(learning_rate=self.config.lr)
         training_op=optimizer.minimize(loss)
         return training_op
 
@@ -164,13 +185,19 @@ class recurrent_NN(object):
     def get_random_batch(self,Xi,yi):
         """get_random_batch
         Returns random subset of the data and labels.
-        Note: not necessarily balanced.
+
+        Inputs: Xi - total numpy matrix for inputs
+                yi - total numpy set of targets.
+
+        Reutnrs: Xsub - random subset of Xi
+                 yi - random subset of yi
+
         """ 
         #make vector and sample indices for true/false.
         nobs=Xi.shape[0]
-        ind_sub=np.random.choice(nobs,self.Nbatch,replace=False)
+        ind_sub=np.random.choice(nobs,self.config.Nbatch,replace=False)
         Xsub = self.get_data(ind_sub,Xi)
-        y_sub = yi[ind_sub]#.reshape((len(ind_sub),1))
+        y_sub = yi[ind_sub].reshape((len(ind_sub),1))
         return Xsub,y_sub
 
     def get_pred_batch(self,i0,i1,Xi):
@@ -183,10 +210,12 @@ class recurrent_NN(object):
         return Xsub
 
     #Should use tf.Data as described in seq2seq
+    
     def get_combined_data(self,text,labels ):
         """
         Try to use the dataset example (following seq2seq tutorial on Tensorflow)
         Tensorflow Does all of the splitting, lookup.  
+        NOT WORKING!
         """
         # a list of strings.
         dataset = tf.data.Dataset.from_tensor_slices(text)
@@ -197,40 +226,40 @@ class recurrent_NN(object):
         #splits the string into a list  
         dataset = dataset.map(lambda string: tf.string_split([string]).values)
         dataset = dataset.map(lambda words: (words, tf.size(words)))
-        dataset = dataset.map(lambda words, size: (sentence_lookup(words,self.wordvec), size))
+        dataset = dataset.map(lambda words, size: (sentence_lookup(words,self.config.wordvec), size))
         #dataset=dataset.map(lambda words,size: sentence_lookup(words), tf.size(words))
         #sent_to_matrix(vec_indices,self.wordvec,cutoff=self.maxlen)
         #zip together
         dataset_total=tf.data.Dataset.zip((dataset,label_dataset))
 
         return dataset_total
-                              
-
         
-    
     def get_data(self,ind,df_vec_ind):
         """get_data
         Takes indices and finds desired comment.
         Then finds wordvec embedding for word_vectors in that
         comment.
         Will pad with zeros up to Nmax.
+
+        Inputs: ind - list of row indices
+                df_vec_ind - 
         """
-        Xi=np.zeros((self.Nbatch,self.maxlen,self.Nfeatures))
-        for i in range(self.Nbatch):
+        Xi=np.zeros((self.config.Nbatch,self.config.maxlen,self.config.Nfeatures))
+        for i in range(self.config.Nbatch):
             iloc=ind[i]
             vec_indices=df_vec_ind[iloc]
-            Xi[i]=sent_to_matrix(vec_indices,self.wordvec,cutoff=self.maxlen)
+            Xi[i]=sent_to_matrix(vec_indices,self.config.wordvec,cutoff=self.config.maxlen)
         return Xi
     
     def train_graph(self,Xi,yi,save_name=None):
         """train_graph
         Runs the deep NN on the reduced term-frequency matrix.
         """
-        self.is_training=True
+        self.config.is_training=True
         #save model and graph
-        saver=tf.train.Saver()
         init=tf.global_variables_initializer()
-        loss_tot=np.zeros(int(self.n_iter/self.nprint+1))
+        loss_tot=np.zeros(int(self.config.Nepoch/self.config.Nprint+1))
+        saver=tf.train.Saver()
         #Try adding everything by name to a collection
         tf.add_to_collection('X',self.X)
         tf.add_to_collection('y',self.y)
@@ -244,12 +273,12 @@ class recurrent_NN(object):
             t0=time.time()
             #Use Writer for tensorboard.
             writer=tf.summary.FileWriter("logdir-train",sess.graph)            
-            for iteration in range(self.n_iter+1):
+            for iteration in range(self.config.Nepoch+1):
                 #select random starting point.
                 X_batch,y_batch=self.get_random_batch(Xi,yi)
                 current_loss=self.train_on_batch(sess, X_batch, y_batch)
                 t2_b=time.time()
-                if (iteration)%self.nprint ==0:
+                if (iteration)%self.config.Nprint ==0:
                     clear_output(wait=True)
                     #current_pred=self.predict_on_batch(sess,X_batch)
                     print('iter #{}. Current log-loss:{}'.format(iteration,current_loss))
@@ -257,10 +286,9 @@ class recurrent_NN(object):
                     print('\n')
                     #save the weights
                     if (save_name != None):
-                        saver.save(sess,save_name,global_step=iteration,
-                                   write_meta_graph=False)
+                        saver.save(sess,save_name,global_step=iteration)
                     #manual logging of loss    
-                    loss_tot[int(iteration/self.nprint)]=current_loss
+                    loss_tot[int(iteration/self.config.Nprint)]=current_loss
             writer.close()
             #Manual plotting of loss.  Writer/Tensorboard supercedes this .
             plt.figure()                            
@@ -281,10 +309,11 @@ class recurrent_NN(object):
         """
         if (reset):
             tf.reset_default_graph()        
-        self.is_training=False
+        self.config.is_training=False
+        self.keep_prob=1
         with tf.Session() as sess:
 
-            saver=tf.train.import_meta_graph(model_name+'.meta')
+            saver=tf.train.import_meta_graph(model_name+'-'+str(num)+'.meta')
             #restore graph structure
             self.X=tf.get_collection('X')[0]
             self.y=tf.get_collection('y')[0]
@@ -296,25 +325,25 @@ class recurrent_NN(object):
             # writer=tf.summary.FileWriter("logdir-pred",sess.graph)            
             # writer.close()
             Nin=input_data.shape[0]
-            if (Nin < self.Nbatch):
+            if (Nin < self.config.Nbatch):
                 print('Number of inputs < Number of batch expected')
                 print('Padding with zeros')
                 input_dat=np.append(input_dat,
-                                    np.zeros((self.Nbatch-Nin,self.Noutputs)))
+                                    np.zeros((self.config.Nbatch-Nin,self.config.Noutputs)))
             i0=0
-            i1=self.Nbatch
+            i1=self.config.Nbatch
 
-            nn_pred_total=np.zeros((Nin,self.Noutputs))
+            nn_pred_total=np.zeros((Nin,self.config.Noutputs))
             while (i1 < Nin):
                 X_batch=self.get_pred_batch(i0,i1,input_data)
                 nn_pred=self.predict_on_batch(sess,X_batch)
                 nn_pred_total[i0:i1]=nn_pred
                 i0=i1
-                i1+=self.Nbatch
+                i1+=self.config.Nbatch
             #last iter: do remaining operations.  (some redundancy here)
-            X_batch=self.get_pred_batch(Nin-self.Nbatch,Nin,input_data)
+            X_batch=self.get_pred_batch(Nin-self.config.Nbatch,Nin,input_data)
             nn_pred=self.predict_on_batch(sess,X_batch)
-            nn_pred_total[-self.Nbatch:]=nn_pred
+            nn_pred_total[-self.config.Nbatch:]=nn_pred
             #nn_pred_reduced=np.round(nn_pred_total).astype(bool)
         return nn_pred_total
 
