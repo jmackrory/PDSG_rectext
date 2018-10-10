@@ -1,0 +1,8 @@
+TODO:
+- Build data pipelines for each model
+- Scale scores?  Play with quantiles
+- Do Cross-validation to select hyper parameters (vectorization choices, regularization, network depth/width/activation)
+- Get RNN working on GPU
+- Get SVM
+- create sklearn metric for weighted errors use mean_squared_error with sample_weights.
+- Spark (word counts, ALS)
