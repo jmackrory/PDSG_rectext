@@ -61,6 +61,8 @@ class recurrentNeuralNetwork(object):
     """
     def __init__(self,config):
         self.config=config
+        #keep a current copy (which can be modified for training/test)
+        self.keep_prob=self.config.keep_prob
         #makes the tensor flow graph.
         self.build()
 
@@ -107,8 +109,9 @@ class recurrentNeuralNetwork(object):
             cell=LSTMCell(num_units=Nneurons,activation=fn)
         elif self.config.cell_type=='GRU':
             cell=GRUCell(num_units=Nneurons,activation=fn)
-        #include dropout when training
-        cell=DropoutWrapper(cell,input_keep_prob=self.config.keep_prob,
+        #include dropout
+        #when training, keep_prob is set by config, and is 1 in eval/predict
+        cell=DropoutWrapper(cell,input_keep_prob=self.keep_prob,
                                 variational_recurrent=True,
                                 input_size=Nneurons,
                                 dtype=tf.float32)
@@ -196,17 +199,18 @@ class recurrentNeuralNetwork(object):
         #make vector and sample indices for true/false.
         nobs=Xi.shape[0]
         ind_sub=np.random.choice(nobs,self.config.Nbatch,replace=False)
-        Xsub = self.get_data(ind_sub,Xi)
+        Xsub = self.get_data_embed(ind_sub,Xi)
         y_sub = yi[ind_sub].reshape((len(ind_sub),1))
         return Xsub,y_sub
 
     def get_pred_batch(self,i0,i1,Xi):
         """get_pred_batch
-        Returns subset of the data for indicies between [i0,i1)
+        Returns subset of the data for indicies between [i0,i1).
+        Used with predict_all to iterate over all indices.
         """ 
         #make vector and sample indices for true/false.
         ind_sub=np.arange(i0,i1)
-        Xsub = self.get_data(ind_sub,Xi)
+        Xsub = self.get_data_embed(ind_sub,Xi)
         return Xsub
 
     #Should use tf.Data as described in seq2seq
@@ -215,6 +219,9 @@ class recurrentNeuralNetwork(object):
         """
         Try to use the dataset example (following seq2seq tutorial on Tensorflow)
         Tensorflow Does all of the splitting, lookup.  
+
+        Ingests raw text, converts text to a list of indices.
+        (Done effectively outside this network in utils in sentence_lookup)
         NOT WORKING!
         """
         # a list of strings.
@@ -239,10 +246,14 @@ class recurrentNeuralNetwork(object):
         Takes indices and finds desired comment.
         Then finds wordvec embedding for word_vectors in that
         comment.
-        Will pad with zeros up to Nmax.
+        Will pad with zeros up to maxlen.
 
-        Inputs: ind - list of row indices
-                df_vec_ind - 
+        Inputs: ind - list of training examples specified via row indices
+                      size (self.config.Nbatch,)
+                df_vec_ind - the matrix to extract lists of wordvec indices from
+                      size (Ndata,self.config.Ndim)   
+        Return Xi - dense numpy array of selected outputs, with entries for each sentence stacked
+                     size (self.config.Nbatch, self.config.maxlen, self.config.Ndim)
         """
         Xi=np.zeros((self.config.Nbatch,self.config.maxlen,self.config.Nfeatures))
         for i in range(self.config.Nbatch):
@@ -250,6 +261,36 @@ class recurrentNeuralNetwork(object):
             vec_indices=df_vec_ind[iloc]
             Xi[i]=sent_to_matrix(vec_indices,self.config.wordvec,cutoff=self.config.maxlen)
         return Xi
+
+    def get_data_embed(self,ind,df_vec_ind):
+        """get_data_embed
+        Takes indices and finds desired comment.
+        Then finds wordvec embedding for word_vectors in that
+        comment.  Uses built-in to look up vectors.
+        Will pad with zeros up to maxlen.
+
+        Inputs: ind - list of training examples specified via row indices
+                      size (self.config.Nbatch,)
+                df_vec_ind - the matrix to extract lists of wordvec indices from
+                      size (Ndata,self.config.Ndim)   
+        Return Xtens - dense tensor of selected outputs, with entries for each sentence stacked
+                     size (self.config.Nbatch, self.config.maxlen, self.config.Ndim)
+        """
+        Xi=np.zeros((self.config.Nbatch,self.config.maxlen,self.config.Nfeatures))
+        vec_indices=np.zeros((self.config.Nbatch,self.config.maxlen))
+        #make padded array of indices (pad with zeros, which is "the")
+        for i in range(self.config.Nbatch):
+            iloc=ind[i]
+            vec=df_vec_ind[iloc]
+            vec_len=len(vec)
+            if (vec_len>self.config.maxlen):
+                vec_indices[i]=vec[:self.config.maxlen]
+            else:
+                vec0=np.zeros(self.config.maxlen)
+                vec0[:vec_len]=vec
+                vec_indices[i]=vec0
+        Xtens=tf.nn.embedding_lookup(self.config.wordvec, vec_indices.astype(int))
+        return Xtens
     
     def train_graph(self,Xi,yi,save_name=None):
         """train_graph
@@ -281,7 +322,7 @@ class recurrentNeuralNetwork(object):
                 if (iteration)%self.config.Nprint ==0:
                     clear_output(wait=True)
                     #current_pred=self.predict_on_batch(sess,X_batch)
-                    print('iter #{}. Current log-loss:{}'.format(iteration,current_loss))
+                    print('iter #{}. Current error:{}'.format(iteration,current_loss))
                     print('Total Time taken:{}'.format(t2_b-t0))
                     print('\n')
                     #save the weights
@@ -293,11 +334,11 @@ class recurrentNeuralNetwork(object):
             #Manual plotting of loss.  Writer/Tensorboard supercedes this .
             plt.figure()                            
             plt.plot(loss_tot)
-            plt.ylabel('Log-loss')
+            plt.ylabel('Error')
             plt.xlabel('Iterations x100')
             plt.show()
             
-    def predict_all(self,model_name,num,input_data,reset=False):
+    def predict_all(self,model_name,input_data,num=None,reset=False):
         """network_predict
         Load a saved Neural network, and predict the output labels
         based on input_data
@@ -311,9 +352,13 @@ class recurrentNeuralNetwork(object):
             tf.reset_default_graph()        
         self.config.is_training=False
         self.keep_prob=1
+        if (num==None):
+            model_path=model_name+'-'+str(self.config.Nepoch)
+        else:
+            model_path=model_name+'-'+str(num)
         with tf.Session() as sess:
-
-            saver=tf.train.import_meta_graph(model_name+'-'+str(num)+'.meta')
+            
+            saver=tf.train.import_meta_graph(model_path+'.meta')
             #restore graph structure
             self.X=tf.get_collection('X')[0]
             self.y=tf.get_collection('y')[0]
@@ -321,7 +366,7 @@ class recurrentNeuralNetwork(object):
             self.train_op=tf.get_collection('train_op')[0]
             self.loss=tf.get_collection('loss')[0]
             #restores weights etc.
-            saver.restore(sess,model_name+'-'+str(num))
+            saver.restore(sess,model_path)
             # writer=tf.summary.FileWriter("logdir-pred",sess.graph)            
             # writer.close()
             Nin=input_data.shape[0]

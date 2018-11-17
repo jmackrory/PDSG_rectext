@@ -3,6 +3,21 @@ TODO:
 - Scale scores?  Play with quantiles
 - Do Cross-validation to select hyper parameters (vectorization choices, regularization, network depth/width/activation)
 - Get RNN working on GPU
-- Get SVM
+- Get SVM working
 - create sklearn metric for weighted errors use mean_squared_error with sample_weights.
+- create ensemble method 
+- use the embedding lookup function
+- use a batch generator.
+- add an estimator interface to allow sklearn to optimize hyperparameters.
+- add variable for length of comment.
+- look up inluded EOS markers?
+- hierarchical neural network?  RNN sentences to vec, RNN sentence vec to doc, doc2vec?
+- 
+- make a pipeline (comment-to-vec, regression)
+- make a new sklearn metric for weighted least squares.
+- make estimator interface
+- do 
+- tune hyperparameters (layers, size, stop-words)
+
+
 - Spark (word counts, ALS)

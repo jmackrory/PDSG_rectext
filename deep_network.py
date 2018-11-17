@@ -111,9 +111,6 @@ class deep_dropout_NN(Model):
         eps=1E-15
         #logloss = tf.losses.log_loss(self.y,outputs,epsilon=eps)
         #loss = tf.reduce_mean(tf.square(self.y-outputs))
-
-        
-        
         loss = tf.losses.mean_squared_error(self.y,outputs)
         #rocloss,roc_op=tf.metrics.auc(self.y,outputs)
         return loss
